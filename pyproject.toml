@@ -1,0 +1,11 @@
+[project]
+name = "shoo-layer3-lab"
+version = "0.1.0"
+description = "Experiment: a rebuilt Shoo layer 3 (structure signals + text meaning) compared with the current rules"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26",
+    "scikit-learn>=1.5",
+    "sentence-transformers>=3.0",
+    "torch>=2.3",
+]

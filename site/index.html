@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoo Layer Compare</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one working column. Input bar, two scoreboards side by side, then a three-track ledger: page | Imelda | ours. */
+:root {
+  --bg: #f2f2f2; --surface: #ffffff; --sunk: #e8e8e8; --line: #cfcfcf; --fg: #111111; --mid: #555555; --muted: #6b6b6b;
+  --accent: #111111; --accent-fg: #ffffff;
+  --display: "Space Grotesk", "Inter", system-ui, sans-serif; --body: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+:root { color-scheme: light }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 24px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 20px }
+h1 { font: 600 24px/1.2 var(--display); margin: 0; text-wrap: balance }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 70ch }
+.mockflag { display: inline-block; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--soft); background: var(--soft-bg); padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle }
+.label { font: 500 11px var(--body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted) }
+
+.input { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px }
+.input textarea { width: 100%; height: 108px; resize: vertical; font: 12px/1.6 var(--mono); background: var(--sunk); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px }
+.side { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+select, input[type="search"] { font: 14px var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; width: 100% }
+button { font: 500 14px var(--body); cursor: pointer }
+.run { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 9px 14px }
+.run:disabled { opacity: .6; cursor: default }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.bar { height: 4px; background: var(--sunk); border-radius: 2px; overflow: hidden }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s linear }
+.hint { color: var(--muted); font-size: 12px; margin: 0 }
+
+.boards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px }
+.board { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px }
+.board h2 { font: 600 16px var(--display); margin: 0 }
+.board h2 small { font: 400 12px var(--body); color: var(--muted); margin-left: 6px }
+.nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
+.num b { display: block; font: 600 28px/1.1 var(--display); font-variant-numeric: tabular-nums }
+.num span { color: var(--muted); font-size: 12px }
+.num.bad b { color: var(--bad) } .num.good b { color: var(--ok) }
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--sunk) }
+.stack i { display: block; height: 100% }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px }
+.c-block { background: var(--bad) } .c-warn { background: var(--warn) } .c-soft { background: var(--soft) } .c-safe { background: var(--ok) }
+
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.chip { background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 13px; font-variant-numeric: tabular-nums }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg) }
+.chip em { font-style: normal; opacity: .65; margin-left: 4px }
+.tools .grow { flex: 1 1 180px; min-width: 0 }
+.tools select { width: auto }
+
+.ledger { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden }
+.row, .head { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); }
+.head { background: var(--sunk); border-bottom: 1px solid var(--line) }
+.head > div { padding: 8px 14px }
+.row { border-bottom: 1px solid var(--line) }
+.toggle { background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; width: 100% }
+.toggle:hover .host { text-decoration: underline }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden }
+.seg button { background: var(--surface); color: var(--muted); border: 0; padding: 2px 9px; font-size: 12px }
+.seg button + button { border-left: 1px solid var(--line) }
+.seg button[aria-pressed="true"].s { background: var(--bad-bg); color: var(--bad) }
+.seg button[aria-pressed="true"].a { background: var(--ok-bg); color: var(--ok) }
+.mark.none { color: var(--muted); font-weight: 400 }
+.err { grid-column: 2 / -1; padding: 10px 14px; color: var(--bad) }
+.shot { width: 100%; max-width: 220px; border: 1px solid var(--line); border-radius: 8px; display: block }
+.open { color: var(--accent); font-weight: 500 }
+.copy { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; font-size: 12px; color: var(--fg) }
+.cell { padding: 10px 14px; min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.cell + .cell { border-left: 1px solid var(--line) }
+.host { font: 500 13px var(--mono); overflow-wrap: anywhere }
+.title { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tags { display: flex; flex-wrap: wrap; gap: 4px }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap }
+.tag.scam { color: var(--bad); border-color: var(--bad) } .tag.legit { color: var(--ok); border-color: var(--ok) } .tag.doubt { color: var(--warn); border-color: var(--warn) }
+.line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.pill { font: 600 12px var(--body); padding: 2px 9px; border-radius: 4px; white-space: nowrap }
+.v-block { background: var(--bad-bg); color: var(--bad) } .v-warn { background: var(--warn-bg); color: var(--warn) } .v-soft { background: var(--soft-bg); color: var(--soft) } .v-safe { background: var(--ok-bg); color: var(--ok) }
+.mark { font-size: 12px; font-weight: 600; white-space: nowrap }
+.mark.miss, .mark.fp { color: var(--bad) } .mark.hit, .mark.right { color: var(--ok) } .mark.weak { color: var(--soft) }
+.meta { color: var(--muted); font: 12px var(--mono); overflow-wrap: anywhere }
+.detail { display: grid; grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); background: var(--sunk); border-bottom: 1px solid var(--line) }
+.detail > div { padding: 14px; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px }
+.lay { display: flex; flex-direction: column; gap: 4px }
+.lay b { font: 600 13px var(--display) }
+.item { color: var(--muted); padding-left: 12px }
+.quote { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px }
+.kv { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 10px; margin: 0 }
+.kv dt { color: var(--muted) } .kv dd { margin: 0; overflow-wrap: anywhere }
+.models { display: flex; flex-direction: column; gap: 3px; padding-left: 12px }
+.mrow { display: grid; grid-template-columns: 112px minmax(0, 1fr) 34px; gap: 8px; align-items: center; font-size: 12px; color: var(--muted) }
+.mbar { height: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 3px; overflow: hidden }
+.mbar i { display: block; height: 100%; background: var(--bad) }
+.why { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.detail p { margin: 0; overflow-wrap: anywhere }
+.detail q { font-family: var(--mono) }
+.empty { padding: 32px 14px; text-align: center; color: var(--muted) }
+.more { display: block; width: 100%; background: none; border: 0; padding: 12px; color: var(--accent) }
+.onlyphone { display: none }
+@media (max-width: 1040px) { .detail { grid-template-columns: 180px minmax(0, 1fr) } }
+@media (max-width: 760px) {
+  .err { grid-column: 1 / -1 }
+  .input, .boards { grid-template-columns: minmax(0, 1fr) }
+  .head { display: none }
+  .row, .detail { grid-template-columns: minmax(0, 1fr) }
+  .cell + .cell { border-left: 0; border-top: 1px dashed var(--line) }
+  .onlyphone { display: inline }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none } }
+
+/* Monochrome: verdicts differ by weight of ink, not by hue. Block = solid, warning = mid grey, unverified = dashed, safe = pale. */
+.mockflag { color: var(--fg); background: var(--sunk) }
+.num.bad b { color: var(--fg); text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 4px } .num.good b { color: var(--muted) }
+.c-block { background: var(--fg) } .c-warn { background: var(--mid) } .c-soft { background: repeating-linear-gradient(135deg, var(--mid) 0 2px, var(--sunk) 2px 5px) } .c-safe { background: var(--line) }
+.tag.scam { color: var(--fg); border-color: var(--fg); font-weight: 600 } .tag.legit, .tag.doubt { color: var(--muted); border-color: var(--line) }
+.v-block { background: var(--fg); color: var(--bg) } .v-warn { background: var(--mid); color: var(--bg) }
+.v-soft { background: none; color: var(--fg); outline: 1px dashed var(--mid); outline-offset: -1px } .v-safe { background: var(--sunk); color: var(--muted) }
+.mark.miss, .mark.fp { color: var(--fg); font-weight: 700 } .mark.miss::before, .mark.fp::before { content: "✕ " }
+.mark.hit, .mark.right { color: var(--muted) } .mark.hit::before, .mark.right::before { content: "✓ " }
+.mark.weak { color: var(--mid); font-style: italic }
+.mbar i { background: var(--fg) }
+.seg button[aria-pressed="true"].s { background: var(--fg); color: var(--bg) }
+.seg button[aria-pressed="true"].a { background: var(--sunk); color: var(--fg); font-weight: 600 }
+.err { color: var(--fg); font-weight: 500 }
+.open { color: var(--fg); text-decoration: underline }
+.more { color: var(--fg) }
+.btns { display: flex; flex-wrap: wrap; gap: 8px }
+.ghost { background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px }
+.ghost:disabled { color: var(--muted); cursor: default }
+
+body { font-size: 15px; line-height: 1.6 }
+.sub { font-size: 16px }
+.hint, .meta, .why, .title { font-size: 13px }
+.cell { gap: 6px; padding: 14px }
+.detail > div { gap: 10px; font-size: 14px }
+.item { padding-left: 0; color: var(--fg) }
+.lay { gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line) }
+.lay:last-of-type { border-bottom: 0 }
+.pill { font-size: 13px; padding: 3px 10px }
+.mark { font-size: 13px }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Shoo Layer Compare</h1>
+    <p class="sub">Tempel URL. Dua sistem memeriksa. Lihat siapa yang benar.</p>
+  </header>
+
+  <section class="input" aria-label="Input">
+    <div class="side">
+      <label class="label" for="urls">URL, satu per baris</label>
+      <textarea id="urls" spellcheck="false">https://www.bca.co.id/ aman
+https://www.tokopedia.com/ aman
+https://example.com/</textarea>
+      <div class="bar" aria-hidden="true"><i id="progress"></i></div>
+      <p class="hint" id="status">Boleh tulis <b>scam</b> atau <b>aman</b> setelah URL. Sekitar 2 detik per halaman.</p>
+    </div>
+    <div class="side">
+      <label class="label" for="policy">Cara kita memutuskan</label>
+      <select id="policy">
+        <option value="balanced">Seimbang (disarankan)</option>
+        <option value="strict">Ketat</option>
+        <option value="judge">Juri</option>
+        <option value="l3">Layer 3 saja</option>
+      </select>
+      <p class="hint" id="policyhint"></p>
+      <button class="run" id="run" type="button">Jalankan</button>
+      <div class="btns">
+        <button class="ghost" id="loadcsv" type="button">Muat CSV</button>
+        <button class="ghost" id="exportcsv" type="button" disabled>Export CSV</button>
+        <button class="ghost" id="exportjson" type="button" disabled>Export JSON</button>
+      </div>
+      <input id="csvfile" type="file" accept=".csv,text/csv,text/plain" hidden>
+    </div>
+  </section>
+
+  <section class="boards" id="boards" aria-label="Ringkasan"></section>
+
+  <section class="tools" aria-label="Filter">
+    <div id="chips" class="tools"></div>
+    <input class="grow" id="q" type="search" placeholder="Cari host atau judul" aria-label="Cari">
+  </section>
+
+  <section class="ledger" aria-label="Hasil">
+    <div class="head"><div class="label">Halaman</div><div class="label">Imelda</div><div class="label">Kita</div></div>
+    <div id="rows"></div>
+  </section>
+</div>
+
+<script>
+let DATA = [];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const VERDICT = { block: "Blokir", warn: "Peringatan", soft: "Ragu", safe: "Aman" };
+const TIER = { block: "blokir", warn: "peringatan", gate: "ragu", safe: "aman" };
+const JUDGE = { scam: "scam", legit: "aman", unsure: "tidak yakin" };
+const L4 = { gated: "tidak dipanggil", reasonable: "bilang wajar", flagged: "menandai", off: "mati", timeout: "waktu habis" };
+const POLICY_HINT = {
+  balanced: "Juri bilang aman + domain lama = aman. Sisanya tetap ditandai.",
+  strict: "Semua yang ragu ditandai. Scam jarang lolos. Situs aman sering kena.",
+  judge: "Juri bilang aman = aman. Umur domain tidak dicek.",
+  l3: "Tanpa juri. Yang ragu dianggap aman.",
+};
+const MODELS = [["meaning", "Makna"], ["chunkmax", "Bagian terburuk"], ["gambling", "Judi"], ["words", "Kata"], ["address", "Alamat"]];
+const FACT = { official: "Domain resmi merek", brandOffsite: "Nama merek di judul", brandTextOffsite: "Nama merek di teks", brandInHost: "Nama merek di alamat", cheapTld: "Akhiran domain murah", sharedHost: "Hosting gratis", ipHost: "Alamat IP", punycode: "Alamat punycode", urlKeywords: "Kata pancingan di alamat", passwordField: "Minta kata sandi", formActionOffsite: "Form kirim ke situs lain" };
+const state = { policy: "balanced", filter: "all", q: "", open: new Set(), labels: {} };
+try { state.labels = JSON.parse(localStorage.getItem("labels") || "{}"); } catch {}
+const saveLabels = () => { try { localStorage.setItem("labels", JSON.stringify(state.labels)); } catch {} };
+const labelOf = (r) => state.labels[r.url] ?? null;
+
+function imelda(r) { return r.im.score >= 80 ? "block" : r.im.score >= 30 ? "warn" : "safe"; }
+const SECOND_LEVEL = /^(co|go|ac|or|web|sch|my|biz|net|com|org|gov|edu|mil|desa|ponpes)\.[a-z]{2}$/;
+function siteOf(url) {
+  let host = "";
+  try { host = new URL(url).hostname.replace(/^www\./, ""); } catch {}
+  const p = host.split(".");
+  return (SECOND_LEVEL.test(p.slice(-2).join(".")) ? p.slice(-3) : p.slice(-2)).join(".");
+}
+const WALL = /access denied|checking your browser|just a moment|attention required|403 forbidden|verify you are human|are you a robot|request blocked|pardon our interruption|domain currently under maintenance|^index of \//i;
+/** Pages where the label no longer describes what was read: sent to another site, or a bot wall instead of the page. */
+function skipped(r) {
+  if (!r.im) return null;
+  if (siteOf(r.finalUrl) !== siteOf(r.url)) return "dialihkan ke " + siteOf(r.finalUrl);
+  if (r.read.textLen < 700 && WALL.test(r.title + " " + r.text.slice(0, 200))) return "diblokir sebagai bot";
+  return null;
+}
+const ageYears = (r) => (r.im.registeredAt ? (Date.now() - Date.parse(String(r.im.registeredAt).slice(0, 10))) / 31557600000 : null);
+function ours(r) {
+  const { tier, j } = r.us;
+  if (tier === "block") return "block";
+  if (tier === "safe") return "safe";
+  if (state.policy === "balanced") {
+    const age = ageYears(r), facts = r.ev.facts;
+    const established = (years) => j === "legit" && age !== null && age >= years && !facts.includes("brandInHost") && !facts.includes("sharedHost") && !facts.includes("ipHost");
+    if (tier === "warn") return j === "scam" ? "block" : established(3) ? "safe" : "warn";
+    return j === "scam" ? "warn" : established(1) ? "safe" : "soft";
+  }
+  if (state.policy === "l3") return tier === "warn" ? "warn" : "safe";
+  if (state.policy === "strict") return tier === "warn" ? "warn" : "soft";
+  if (tier === "warn") return j === "scam" ? "block" : "warn";
+  return j === "legit" ? "safe" : "soft";
+}
+function mark(r, v) {
+  const label = labelOf(r);
+  if (skipped(r)) return ["none", "tidak dihitung"];
+  if (label === null) return ["none", "belum dilabeli"];
+  if (label) return v === "safe" ? ["miss", "Lolos"] : v === "soft" ? ["weak", "Tertangkap (ragu)"] : ["hit", "Tertangkap"];
+  return v === "safe" ? ["right", "Benar"] : v === "soft" ? ["weak", "Salah tandai (ragu)"] : ["fp", "Salah tandai"];
+}
+const FILTERS = [
+  ["all", "Semua", () => true],
+  ["diff", "Hasil beda", (r, a, b) => r.im && a !== b],
+  ["won", "Hanya kita yang tangkap", (r, a, b) => !skipped(r) && labelOf(r) === 1 && a === "safe" && b !== "safe"],
+  ["both", "Dua-duanya lolos", (r, a, b) => !skipped(r) && labelOf(r) === 1 && a === "safe" && b === "safe"],
+  ["ourfp", "Kita salah tandai", (r, a, b) => !skipped(r) && labelOf(r) === 0 && r.im && b !== "safe"],
+  ["imfp", "Imelda salah tandai", (r, a) => !skipped(r) && labelOf(r) === 0 && r.im && a !== "safe"],
+  ["nolabel", "Belum dilabeli", (r) => labelOf(r) === null],
+  ["skipped", "Tidak dihitung", (r) => !!skipped(r)],
+  ["failed", "Gagal dibuka", (r) => !r.im],
+];
+
+function board(name, note, verdictOf) {
+  const ok = DATA.filter((r) => r.im && !skipped(r));
+  const scam = ok.filter((r) => labelOf(r) === 1), legit = ok.filter((r) => labelOf(r) === 0);
+  const count = (list) => { const c = { block: 0, warn: 0, soft: 0, safe: 0 }; list.forEach((r) => c[verdictOf(r)]++); return c; };
+  const s = count(scam), l = count(legit), all = count(ok);
+  const strip = (c, n) => `<div class="stack" role="img" aria-label="blokir ${c.block}, peringatan ${c.warn}, ragu ${c.soft}, aman ${c.safe}">${["block", "warn", "soft", "safe"].map((k) => `<i class="c-${k}" style="width:${n ? 100 * c[k] / n : 0}%"></i>`).join("")}</div>
+    <div class="legend">${["block", "warn", "soft", "safe"].filter((k) => c[k]).map((k) => `<span><i class="c-${k}"></i>${VERDICT[k]} ${c[k]}</span>`).join("")}</div>`;
+  const num = (bad, n, text) => `<div class="num ${n && bad ? "bad" : n ? "good" : ""}"><b>${n ? bad + " / " + n : "–"}</b><span>${text}</span></div>`;
+  return `<div class="board"><h2>${name}<small>${note}</small></h2>
+    <div class="nums">${num(s.safe, scam.length, "scam lolos")}${num(legit.length - l.safe, legit.length, "situs aman salah ditandai")}</div>
+    ${scam.length + legit.length ? "" : '<p class="hint">Labeli halaman dulu: Scam atau Aman.</p>'}
+    <div><div class="label">Halaman yang dihitung (${ok.length})</div>${strip(all, ok.length)}</div></div>`;
+}
+
+function detail(r) {
+  const layer = (n, name) => {
+    const sig = r.im.signals.filter((x) => x.layer === n);
+    return `<div class="lay"><b>L${n} ${name} · ${sig.reduce((t, x) => t + x.pts, 0)} poin</b>${sig.map((x) => `<p class="item">${esc(x.label)} (+${x.pts})${x.ev ? `: <q>${esc(x.ev)}</q>` : ""}</p>`).join("")}</div>`;
+  };
+  const l4 = r.im.signals.find((x) => x.layer === 4);
+  const e = r.ev, asked = r.us.tier === "gate" || r.us.tier === "warn", caught = r.us.tier !== "safe";
+  const bars = MODELS.map(([k, name]) => `<div class="mrow"><span>${name}</span><div class="mbar"><i style="width:${Math.round(100 * e.base[k])}%"></i></div><span class="meta">${e.base[k].toFixed(2)}</span></div>`).join("");
+  return `<div class="detail">
+    <div><img class="shot" src="${esc(r.shot)}" alt="Tangkapan layar ${esc(r.host)}" loading="lazy"></div>
+    <div><span class="label">Yang dibaca Shoo</span>
+      <dl class="kv"><dt>Judul</dt><dd>${esc(r.title || "(tanpa judul)")}</dd><dt>Teks</dt><dd>${r.read.textLen.toLocaleString("id-ID")} karakter · ${r.read.forms} form${r.read.fields.length ? " (" + r.read.fields.map(esc).join(", ") + ")" : ""}</dd><dt>HTTP</dt><dd>${esc(r.status ?? "–")}</dd><dt>Akhir</dt><dd class="meta">${esc(r.finalUrl)}</dd><dt>Dibuat</dt><dd>${r.im.registeredAt ? esc(String(r.im.registeredAt).slice(0, 10)) : "–"}</dd><dt>Bahasa</dt><dd>${esc(r.read.lang || "tidak disebut")}</dd></dl>
+      <p class="quote">${esc(r.text)}…</p>
+      <p><a class="open" href="${esc(r.finalUrl)}" target="_blank" rel="noopener noreferrer">Buka halaman</a> <button type="button" class="copy" data-copy="${esc(r.finalUrl)}">Salin</button></p>
+      <p class="meta">Bisa jadi scam. Jangan isi data.</p>
+      <p class="meta">Dibaca Chromium di Mac ini. Bisa beda dengan Safari.</p></div>
+    <div><span class="label">Bukti Imelda</span>
+      ${layer(1, "Daftar")}${layer(2, "Domain")}${layer(3, "Halaman")}
+      <div class="lay"><b>L4 AI · ${l4 ? l4.pts + " poin" : "0 poin"}</b> <span class="meta">${esc(L4[r.im.layer4] || r.im.layer4)}</span>${l4 ? `<p class="item">${esc(l4.label)}${l4.ev ? `: <q>${esc(l4.ev)}</q>` : ""}</p>` : ""}</div>
+      <p class="meta">Total ${r.im.score}. Peringatan mulai 30. Blokir mulai 80.</p></div>
+    <div><span class="label">Bukti kita</span>
+      <div class="lay"><b>L3 baru · skor ${e.final.toFixed(2)} · ${TIER[r.us.tier]}</b><p class="meta">Ragu mulai ${e.limits.gate.toFixed(2)}. Peringatan mulai ${e.limits.warn.toFixed(2)}. Blokir mulai ${e.limits.block.toFixed(2)}.</p>
+        <div class="models">${bars}</div>
+        ${caught ? `<p class="item">Teks paling mencurigakan${e.chunk.kind === "gambling" ? " (judi)" : ""}:</p><p class="quote">${esc(e.chunk.text)}…</p>${e.words.length ? `<p class="item">Kata pemicu: ${e.words.map((w) => `<q>${esc(w)}</q>`).join(" ")}</p>` : ""}` : `<p class="item">${e.official ? "Domain resmi merek. Selalu aman." : "Tidak ada tanda scam."}</p>`}
+        ${e.facts.length ? `<p class="item">Tanda di alamat dan form: ${e.facts.map((f) => FACT[f] || f).join(" · ")}</p>` : ""}</div>
+      <div class="lay"><b>L4 Juri · ${asked ? (r.us.j ? JUDGE[r.us.j] : esc(r.us.failed || "tidak menjawab")) : "tidak ditanya"}</b>${asked && r.us.j ? ` <span class="meta">${esc(r.us.cat || "")}${r.us.conf != null ? " · yakin " + r.us.conf.toFixed(2) : ""}${r.us.ms ? " · " + r.us.ms + " ms" : ""}</span>` : ""}
+        ${asked && r.us.ev ? `<p class="item">Kutipan juri:</p><p class="quote">${esc(r.us.ev)}</p>` : ""}${asked ? "" : `<p class="item">${r.us.tier === "block" ? "Layer 3 yakin scam. Langsung blokir." : "Layer 3 yakin aman."}</p>`}</div></div>
+  </div>`;
+}
+
+function render() {
+  $("policyhint").textContent = POLICY_HINT[state.policy];
+  $("exportcsv").disabled = $("exportjson").disabled = !DATA.length;
+  $("boards").innerHTML = board("Imelda", "pipeline sekarang", imelda) + board("Kita", "layer 3 baru + juri", ours);
+  const judged = DATA.map((r) => [r, r.im ? imelda(r) : null, r.im ? ours(r) : null]);
+  $("chips").innerHTML = FILTERS.map(([id, text, test]) => `<button type="button" class="chip" data-f="${id}" aria-pressed="${state.filter === id}">${text}<em>${judged.filter(([r, a, b]) => test(r, a, b)).length}</em></button>`).join("");
+  const test = FILTERS.find((f) => f[0] === state.filter)[2];
+  const q = state.q.toLowerCase();
+  const shown = judged.filter(([r, a, b]) => test(r, a, b) && (!q || (r.url + " " + (r.title || "")).toLowerCase().includes(q)));
+  const html = shown.map(([r, a, b]) => {
+    const label = labelOf(r), open = state.open.has(r.url);
+    const seg = `<span class="seg" role="group" aria-label="Label asli"><button type="button" class="s" data-label="1" data-url="${esc(r.url)}" aria-pressed="${label === 1}">Scam</button><button type="button" class="a" data-label="0" data-url="${esc(r.url)}" aria-pressed="${label === 0}">Aman</button></span>`;
+    if (!r.im) return `<div class="row"><div class="cell"><div class="host">${esc(r.url)}</div><div class="tags">${seg}</div></div><div class="err">${esc(r.error || "Gagal dibuka.")}</div></div>`;
+    const [ma, ta] = mark(r, a), [mb, tb] = mark(r, b);
+    const asked = r.us.tier === "gate" || r.us.tier === "warn";
+    const juri = state.policy === "l3" || !asked ? "" : `juri: ${r.us.j ? JUDGE[r.us.j] : "tidak menjawab"}`;
+    return `<div class="row">
+      <div class="cell"><button type="button" class="toggle" data-id="${esc(r.url)}" aria-expanded="${open}"><span class="host">${esc(r.url.replace(/^https?:\/\//, ""))}</span><span class="title">${esc(r.title || "(tanpa judul)")}</span></button>
+        <div class="tags">${seg}${r.ev.indo ? '<span class="tag">Indonesia</span>' : ""}${r.read.fields.includes("password") ? '<span class="tag">form password</span>' : ""}${skipped(r) ? `<span class="tag scam">${esc(skipped(r))}</span>` : ""}${r.us.raised ? '<span class="tag">domain baru</span>' : ""}</div></div>
+      <div class="cell"><div class="line"><span class="onlyphone label">Imelda </span><span class="pill v-${a}">${r.im.score >= 50 && r.im.score < 80 ? "Peringatan 2" : VERDICT[a]}</span><span class="mark ${ma}">${ta}</span></div><div class="meta">skor ${r.im.score} · AI ${esc(L4[r.im.layer4] || r.im.layer4)}</div>${r.im.signals.length ? `<div class="why">${r.im.signals.map((x) => esc(x.label)).join(" · ")}</div>` : ""}</div>
+      <div class="cell"><div class="line"><span class="onlyphone label">Kita </span><span class="pill v-${b}">${VERDICT[b]}</span><span class="mark ${mb}">${tb}</span></div><div class="meta">skor ${r.ev.final.toFixed(2)}${juri ? " · " + juri : ""}</div>${b !== "safe" ? `<div class="why">${esc(r.us.ev || r.ev.chunk.text.slice(0, 110))}</div>` : ""}</div>
+    </div>${open ? detail(r) : ""}`;
+  }).join("");
+  $("rows").innerHTML = html || `<div class="empty">${DATA.length ? "Tidak ada halaman yang cocok dengan filter ini." : "Belum ada hasil. Tempel URL, lalu tekan Jalankan."}</div>`;
+}
+
+$("policy").addEventListener("change", (e) => { state.policy = e.target.value; render(); });
+$("q").addEventListener("input", (e) => { state.q = e.target.value; render(); });
+$("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (b) { state.filter = b.dataset.f; render(); } });
+$("rows").addEventListener("click", (e) => {
+  const copy = e.target.closest("[data-copy]");
+  if (copy) return navigator.clipboard.writeText(copy.dataset.copy).then(() => { copy.textContent = "Tersalin"; }, () => {});
+  const seg = e.target.closest("[data-label]");
+  if (seg) {
+    const v = Number(seg.dataset.label);
+    if (state.labels[seg.dataset.url] === v) delete state.labels[seg.dataset.url]; else state.labels[seg.dataset.url] = v;
+    saveLabels();
+    return render();
+  }
+  const row = e.target.closest(".toggle");
+  if (!row) return;
+  state.open.has(row.dataset.id) ? state.open.delete(row.dataset.id) : state.open.add(row.dataset.id);
+  render();
+});
+$("run").addEventListener("click", async () => {
+  const urls = [];
+  for (const line of $("urls").value.split("\n")) {
+    const [url, tag] = line.trim().split(/\s+/);
+    if (!/^https?:\/\//i.test(url || "")) continue;
+    urls.push(url);
+    if (/^scam$/i.test(tag || "")) state.labels[url] = 1;
+    if (/^(aman|legit|safe)$/i.test(tag || "")) state.labels[url] = 0;
+  }
+  saveLabels();
+  if (!urls.length) { $("status").textContent = "Tidak ada URL yang diawali http:// atau https://."; return; }
+  const run = $("run"), bar = $("progress");
+  run.disabled = true;
+  bar.style.width = "0";
+  try {
+    const started = await fetch("/api/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ urls: [...new Set(urls)] }) }).then((r) => r.json());
+    if (!started.id) throw new Error(started.error || "Server menolak permintaan.");
+    DATA = []; state.open.clear(); state.filter = "all";
+    for (;;) {
+      const job = await fetch("/api/job/" + started.id + "?from=" + DATA.length).then((r) => r.json());
+      if (job.results.length) { DATA = DATA.concat(job.results); render(); }
+      bar.style.width = (100 * DATA.length / job.total) + "%";
+      $("status").textContent = job.done ? `Selesai: ${DATA.length} halaman.` : `Memeriksa ${DATA.length} dari ${job.total}…`;
+      if (job.done && !job.results.length) break;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  } catch (err) {
+    $("status").textContent = "Gagal: " + (err.message || "server tidak menjawab") + " Pastikan server masih jalan, lalu coba lagi.";
+  }
+  run.disabled = false;
+});
+
+// CSV in: first column url, optional second column label (scam / aman). A header row is skipped because it is not a URL.
+$("loadcsv").addEventListener("click", () => $("csvfile").click());
+$("csvfile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const lines = (await file.text()).split(/\r?\n/).map((l) => l.split(",").map((c) => c.trim().replace(/^"|"$/g, ""))).filter((c) => /^https?:\/\//i.test(c[0] || ""));
+  $("urls").value = lines.map((c) => c[0] + (/^(scam|aman|legit|safe)$/i.test(c[1] || "") ? " " + c[1].toLowerCase() : "")).join("\n");
+  $("status").textContent = `${lines.length} URL dimuat dari ${file.name}. Tekan Jalankan.`;
+  e.target.value = "";
+});
+// Export: what is on screen now, under the rule that is selected now.
+function save(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function exportRows() {
+  return DATA.map((r) => {
+    const label = labelOf(r), base = { url: r.url, not_counted: skipped(r) || "", label: label === null ? "" : label ? "scam" : "aman", final_url: r.finalUrl || "", http: r.status ?? "", error: r.im ? "" : r.error || "gagal dibuka" };
+    if (!r.im) return base;
+    const a = imelda(r), b = ours(r);
+    return { ...base, title: r.title, text_chars: r.read.textLen, forms: r.read.forms, domain_created: r.im.registeredAt ? String(r.im.registeredAt).slice(0, 10) : "",
+      imelda_verdict: a, domain_age_years: ageYears(r) === null ? "" : ageYears(r).toFixed(1), imelda_mark: label === null ? "" : mark(r, a)[1], imelda_score: r.im.score, imelda_layer4: r.im.layer4, imelda_signals: r.im.signals.map((x) => `L${x.layer} ${x.label} (+${x.pts})`).join(" | "),
+      ours_rule: state.policy, ours_verdict: b, ours_mark: label === null ? "" : mark(r, b)[1], ours_tier: r.us.tier, ours_score: r.ev.final,
+      ours_meaning: r.ev.base.meaning, ours_chunk: r.ev.base.chunkmax, ours_gambling: r.ev.base.gambling, ours_words: r.ev.base.words, ours_address: r.ev.base.address,
+      judge_verdict: r.us.j || r.us.failed || "", judge_category: r.us.cat || "", judge_confidence: r.us.conf ?? "", judge_evidence: r.us.ev || "", ours_evidence: r.us.tier === "safe" ? "" : r.ev.chunk.text, ours_trigger_words: r.ev.words.join(" | "), ours_facts: r.ev.facts.join(" | ") };
+  });
+}
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+$("exportcsv").addEventListener("click", () => {
+  const rows = exportRows(), cols = [...new Set(rows.flatMap(Object.keys))];
+  const cell = (v) => { let t = String(v ?? "").replace(/\s+/g, " "); if (/^[=+\-@]/.test(t)) t = "'" + t; return /[",]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }; // no spreadsheet formulas from page text
+  save(`shoo-compare-${stamp()}.csv`, "﻿" + [cols.join(","), ...rows.map((r) => cols.map((c) => cell(r[c])).join(","))].join("\n"), "text/csv");
+});
+$("exportjson").addEventListener("click", () => save(`shoo-compare-${stamp()}.json`, JSON.stringify({ exported: new Date().toISOString(), rule: state.policy, pages: DATA.map((r) => ({ ...r, label: labelOf(r) === null ? null : labelOf(r) ? "scam" : "aman" })) }, null, 1), "application/json"));
+render();
+</script>
+</body>
+</html>
