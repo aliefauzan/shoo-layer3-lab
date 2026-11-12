@@ -1,177 +1,241 @@
 # shoo-layer3-lab
 
-Experiment: a rebuilt Shoo layer 3 (structure signals + text meaning) compared with the current layer 3 rules in
-`Final-CH7/ai`. Nothing here ships. The Shoo repo is only read (its parser and rules are imported, never edited).
+Shoo blocks scam sites on iPhone. Its server has a step called layer 3 that reads a page and decides how risky it is.
+Today that step is a list of hand-written rules.
 
-## Results at a glance (13 Nov 2026)
+This repo is an experiment. It replaces those rules with a trained model, adds a new prompt for the AI check that
+comes after it (layer 4), and measures both against what Shoo runs today.
 
-"Shipped" is the pipeline in the Shoo repo today (layers 1-2 on device, layer 3 rules, layer 4 `reality-check.v4`).
-"Rebuilt" is this lab: the rebuilt layer 3 plus the `scam-judge.v1` layer 4 prompt. A page counts as caught when the
-pipeline shows any warning or blocks it.
+Nothing here ships. The Shoo repo is only read: its parser and rules are imported, never edited.
 
-**Live pages** (`site/urls-500.csv`, read with headless Chromium on 13 Nov 2026; 397 of 500 counted: 75 redirected to
-another site, 11 showed a bot wall, 17 did not open). None of these sites was in training.
+## Results
 
-| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged | Precision |
-|---|---|---|---|---|---|
-| Shipped | 64.7% | 23.1% (40/173) | 76.9% | 3.1% (7/224) | 85.1% |
-| Rebuilt, strict rule | 88.4% | 96.0% (166/173) | 4.0% | 17.4% (39/224) | 81.0% |
-| Rebuilt, balanced rule | 94.5% | 94.8% (164/173) | 5.2% | 5.8% (13/224) | 92.7% |
+Two names are used below:
 
-**Held-out pages** (2,402 saved pages from sites not in training: 828 scam, 1,574 legit). No live blocklist and no
-domain age for either pipeline, so the balanced rule cannot be measured here.
+- **Shipped** is what the Shoo repo runs today: layers 1-2 on the phone, the layer 3 rules, and the layer 4 prompt
+  `reality-check.v4`.
+- **Rebuilt** is this lab: the trained layer 3 and the layer 4 prompt `scam-judge.v1`.
 
-| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged | Precision |
-|---|---|---|---|---|---|
-| Shipped | 65.9% | 3.4% (28/828) | 96.6% | 1.1% (18/1,574) | 60.9% |
-| Rebuilt layer 3 alone | 92.0% | 82.1% (680/828) | 17.9% | 2.8% (44/1,574) | 93.9% |
-| Rebuilt, strict rule | 88.3% | 96.1% (796/828) | 3.9% | 15.9% (250/1,574) | 76.1% |
-| Rebuilt, judge rule | 92.3% | 86.7% (718/828) | 13.3% | 4.7% (74/1,574) | 90.7% |
+A page counts as caught when the pipeline warns about it or blocks it.
 
-Rules for the rebuilt pipeline (layer 3 puts a page in one of four tiers: safe, unsure, warn, block):
+### Live pages
 
-- **strict**: every unsure page gets a soft warning.
-- **judge**: an unsure page passes when the layer 4 judge says legit.
-- **balanced**: the judge's "legit" counts only on an established domain (1 year for unsure, 3 years for warn) whose
-  address has no brand name, shared host or raw IP. Needs the live domain age.
+500 real URLs from `site/urls-500.csv`, opened on 13 Nov 2026. None of these sites was used for training.
+397 pages were counted. The other 103 were left out: 75 sent the browser to a different site, 11 showed a
+"prove you are human" page, and 17 did not open.
 
-How far to trust these numbers:
+| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged |
+|---|---|---|---|---|
+| Shipped | 64.7% | 23.1% (40 of 173) | 76.9% | 3.1% (7 of 224) |
+| Rebuilt, strict rule | 88.4% | 96.0% (166 of 173) | 4.0% | 17.4% (39 of 224) |
+| Rebuilt, balanced rule | 94.5% | 94.8% (164 of 173) | 5.2% | 5.8% (13 of 224) |
 
-- The balanced rule's age limits were chosen on the same 500 live URLs, so its row is optimistic. It needs a fresh
-  URL list to confirm.
-- Scam labels on live URLs mean "reported to a public phishing feed today". Some pages may already be replaced.
-- Held-out scam labels contain errors (for example popular real shops labelled scam), which lowers every row.
-- The rebuilt pipeline did not use the on-device layers 1-2. The shipped one did.
-- The judge was asked for 142 of the 397 live pages (36%); the shipped layer 4 runs only for scores 30-79.
+### Saved pages
 
-## Run
+2,402 saved pages from sites that were not used for training: 828 scam and 1,574 legit. These pages are old, so
+neither pipeline could use the live blocklist or the age of the domain. The balanced rule needs the domain age, so it
+is not in this table.
 
-```bash
-A=~/epel/Final-CH7/ai
-node src/build_snapshots.mjs $A data/scamweb out/pages.jsonl                         # ScamWeb snapshots + current rule result
-node src/build_snapshots.mjs $A --corpus out/corpus.jsonl                            # Imelda's Indonesian eval corpus
-python3 -I src/fetch_pages.py sites data/legit_top data/lists/sites_top.txt          # legit pages: home + login/checkout + one more
-python3 -I src/fetch_pages.py urls data/judol data/lists/judol_urls.txt              # reported scam URLs, static GET only
-uv run --no-project --with duckdb python -I src/sample_phish.py data/phish 6         # real phishing pages (CC0 set)
-node src/build_snapshots.mjs $A --dir out/src_phish.jsonl data/phish 1 phish -       # one per source: <dir> <label> <prefix> <language|->
-python3 -I src/assemble.py out                                                       # clean + merge sources -> out/extra.jsonl
-uv run python src/embed.py out/pages.jsonl out/emb                                   # bge-m3 chunk vectors
-uv run python src/embed.py out/extra.jsonl out/extra_emb
-uv run python src/embed.py out/corpus.jsonl out/corpus_emb
-uv run python src/train_eval.py out --refit                                          # full fit (about 25 min); without --refit: meta only
-cd src && uv run python analyze.py --id scam_18544                                   # one page, both systems, with evidence
+| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged |
+|---|---|---|---|---|
+| Shipped | 65.9% | 3.4% (28 of 828) | 96.6% | 1.1% (18 of 1,574) |
+| Rebuilt, layer 3 alone | 92.0% | 82.1% (680 of 828) | 17.9% | 2.8% (44 of 1,574) |
+| Rebuilt, strict rule | 88.3% | 96.1% (796 of 828) | 3.9% | 15.9% (250 of 1,574) |
+| Rebuilt, judge rule | 92.3% | 86.7% (718 of 828) | 13.3% | 4.7% (74 of 1,574) |
+
+### How much to trust these numbers
+
+- The balanced rule looks better than it is. Its domain age limits were picked on the same 500 URLs it is scored on.
+  It needs a new URL list to confirm.
+- A scam label on a live URL means someone reported it to a public phishing feed that day. Some of those pages had
+  already been replaced when we opened them.
+- Some saved pages are labelled scam by mistake, for example the real site of a well-known shop. That pulls every row
+  down a little.
+- The rebuilt pipeline ran without the phone layers 1-2. The shipped one ran with them.
+- The rebuilt pipeline asks the AI more often: for 142 of the 397 live pages (36%). The shipped one asks only when
+  the score is between 30 and 79.
+
+## How it works
+
+```mermaid
+flowchart TD
+    A["Web page"] --> B["PageSnapshot<br/>url, title, text, forms"]
+
+    B --> M1["Meaning of the whole page"]
+    B --> M2["Worst part of the page"]
+    B --> M3["Online gambling"]
+    B --> M4["Words used"]
+    B --> M5["Shape of the address"]
+    B --> F["Facts<br/>password form, brand name on<br/>a domain the brand does not own,<br/>cheap domain ending, free hosting"]
+
+    M1 --> C1["Combiner that uses the address"]
+    M2 --> C1
+    M3 --> C1
+    M4 --> C1
+    M5 --> C1
+    F --> C1
+
+    M1 --> C2["Combiner that ignores the address"]
+    M2 --> C2
+    M3 --> C2
+    M4 --> C2
+    F --> C2
+
+    C1 --> S["Score 0 to 1<br/>average of both combiners"]
+    C2 --> S
+
+    S --> T{"Tier"}
+    T -->|safe| OK["Pass"]
+    T -->|unsure| J["Layer 4 judge<br/>scam-judge.v1"]
+    T -->|warn| J
+    T -->|block| BL["Block"]
+
+    J --> R{"Decision rule"}
+    D["Domain age"] --> R
+    R --> OK
+    R --> W["Warn"]
+    R --> BL
 ```
 
-## Data (not committed)
+Step by step:
 
-| Source | Label | Pages used |
-|---|---|---|
-| `kirco567/ScamWeb-Dataset` (CC BY 4.0) | scam + benign | 3,041 + 2,227 |
-| `nyuuzyou/phishing-snapshots` (CC0), takedown pages removed | scam | 3,489 |
-| Indonesian judol pages found by search, gambling wording required | scam | 90 |
-| Tranco top sites: home, login/checkout, one more page | benign | 1,714 |
-| Tranco long-tail small sites | benign | 2,500 |
-| Indonesian `.id` sites and 173 hand-listed Indonesian sites | benign | 1,610 |
-| `0xRafie/indonesian-gambling-multimodal-dataset` captions | training only | 4,892 |
-| Imelda's eval corpus (47 scam, 45 hand-written; 39 legit) | test only | 86 |
+1. **Input.** The model sees only what the Shoo extension already sends: the address, the title, the page text and
+   the form fields. It never sees the raw HTML.
+2. **Text to numbers.** The text is cut into at most four pieces of 1,200 characters. A public model called
+   `BAAI/bge-m3` turns each piece into a list of 1,024 numbers that stands for its meaning. We do not train that
+   model.
+3. **Five small models.** Each one gives a score from 0 to 1:
+   - the meaning of the whole page,
+   - the most suspicious piece of the page,
+   - online gambling wording (also trained on Indonesian gambling captions),
+   - which words and letter patterns appear in the text,
+   - letter patterns in the address.
+4. **Facts.** Things that can be checked directly: a password field, a brand name on a domain the brand does not own,
+   a cheap domain ending, free hosting, a raw IP address. The brand list comes from Shoo's own `brands.json`.
+5. **Two combiners.** Both take the five scores and the facts and produce one score. One of them ignores the address.
+   That matters for hacked school and government sites: the address looks trustworthy, the content is gambling.
+   The final score is the average of the two.
+6. **Tiers.** The score puts the page in one of four tiers: safe, unsure, warn or block. Indonesian pages and other
+   pages have their own limits. The limits are set so that only a small share of legit pages lands in each tier:
+   0.5% in block, 2% in warn, 15% in unsure. Official brand domains are always safe.
+7. **Layer 4 judge.** For unsure and warn pages, an LLM reads the page and answers scam, legit or unsure, with a
+   quote from the page as evidence.
+8. **Decision rule.** This turns the tier and the judge's answer into what the user sees:
+   - **strict**: every unsure page gets a soft warning. Fewest scams get through, most legit pages get flagged.
+   - **judge**: an unsure page passes when the judge says legit.
+   - **balanced**: the judge's "legit" only counts when the domain is old enough (1 year for unsure, 3 years for
+     warn) and the address has no brand name, free hosting or raw IP in it. A page on a domain younger than 180 days
+     that uses a brand name is always sent to the judge, even if layer 3 called it safe.
 
-Dropped: Indonesia-targeted URLs from Phishing.Database fetched live. They now serve unrelated pages, so the labels
-are wrong. Scam pages are hostile: only saved HTML is parsed as text; never open one in a browser.
+For comparison, the shipped pipeline adds up points from hand-written rules. Below 30 points nothing is shown. From
+30 to 79 it asks layer 4. At 80 or more it blocks.
 
-## Design
+### Size
 
-Input is the PageSnapshot contract only (url, title, text, forms).
+| Part | Size |
+|---|---|
+| The models we trained (five small models, two combiners) | 18 MB |
+| `BAAI/bge-m3`, used as it is | about 2.3 GB on disk, 1.1 GB in memory at half precision |
 
-1. Five base models: page meaning (mean bge-m3 chunk vector), highest-scoring chunk, gambling head, word and
-   character patterns of the text, character patterns of the address.
-2. Facts: form fields, brand named on a non-official host, cheap TLD, shared host, current rule signals.
-3. Two boosted-tree combiners, one with the address and one without, averaged. A hijacked school or government
-   site has a trustworthy address but scam content; the no-address model covers that case.
-4. Official hosts are exempt, as in the current layer 3.
-5. Tiers, per language group, set on benign dev pages: block (<= 0.5% of benign), warn (<= 2%), gate = send to
-   layer 4 (<= 15%). Below the gate the page passes as safe.
+Retraining with new data only touches the 18 MB part and takes minutes.
 
-Training pages whose label looks wrong are removed (19 of 10,357): "scam" pages that every model fitted without
-them calls clearly benign. Test pages are never removed.
+## What we learned
 
-## Result (held-out sites, 2,149 pages: 790 scam, 1,359 benign)
-
-| | Current rules | Rebuilt layer 3 |
-|---|---|---|
-| Scam blocked | 0.0% | 47.7% |
-| Scam warned or blocked | 0.8% | 79.5% |
-| Scam reaching layer 4 or higher | 0.8% | 95.8% |
-| Scam passed as safe | 99.2% | 4.2% |
-| Benign warned | 0.7% | 2.9% |
-| Benign sent to layer 4 | 0.7% | 16.4% |
-
-Indonesian: judol pages (23) passed as safe 0; ScamWeb Indonesian (3) 0; Imelda corpus scam (47) 0, against 16 for
-the current rules. Real legit pages in Imelda's corpus warned: 0 of 29. Hand-written legit trap pages warned: 7 of 10.
-
-Audit of the 32 held-out scam pages passed as safe (judged from their text, with the earlier with-address model):
-5 real misses, 8 are the genuine legit site (wrong label), 19 cannot be told from an ordinary site by content.
+- The shipped layer 4 prompt only judges whether a form asks for too much. We asked it about 373 scam pages and it
+  answered "reasonable" for 353 of them. It has nothing to say about scams without a form: fake shops, gambling,
+  investment schemes, giveaways.
+- The new judge prompt was written once and not adjusted after looking at test results. On saved pages it raised
+  blocked scams from 51.1% to 63.5% and called 12 of 245 legit pages scam.
+- The judge called 161 scam-labelled saved pages legit. 36 of those are on the list of the one million most visited
+  sites, so the label is probably wrong. 11 were dead or placeholder pages. Most of the rest are shop pages that read
+  like any real shop.
+- A copy of a real shop cannot be caught from its text. It needs the domain age and the blocklist.
+- Many reported phishing domains send visitors they do not want to Yahoo, Bing or Google. 75 of the 500 live URLs did
+  this. What loads is the real search engine, so neither pipeline can flag it.
+- Indonesian results on saved pages: of 38 real Indonesian phishing pages and 23 online gambling pages, the strict
+  rule let none through.
+- Bare login pages with very little text are the main source of wrong flags. They look like phishing pages.
+- Shoo's eval corpus has 10 hand-written legit pages built to be tricky (a real identity check, a news article about
+  scams, a checkout with card fields). 6 or 7 of them still get flagged. The 29 real legit pages in that corpus: none.
+- The judge cost, for 637 calls on saved pages: 1.11M tokens in, 0.33M out, 1.5 seconds median, 2.6 seconds at the
+  95th percentile.
 
 ## Known limits
 
-- "Current rules" is layer 3 alone: no blocklist, no URL-shape signals, no domain age, no LLM.
-- Hand-written legit traps (legit KYC, a news article warning about scams, shop checkout with card fields) are
-  still warned. Content alone cannot separate them; layer 4 or domain age must.
-- Clone shops that copy a real shop word for word look legit by content. Domain age is the signal for those.
-- Indonesian scam test data is small: 23 judol pages, 3 ScamWeb pages, 47 mostly hand-written corpus pages. No real
-  Indonesian phishing set exists yet; production reports are the only source.
-- Benign pages sent to layer 4: 16.4% overall, 28.8% for pages with a password form. That is LLM cost and latency.
-- Hijacked sites often show the scam only to search engines; a plain fetch sees the clean site.
-- Runs in Python on a Mac. For the Worker: embedding via Workers AI, linear heads and trees as weight tables.
+- It runs in Python on a Mac. Shoo's server is a Cloudflare Worker, which cannot hold a 2.3 GB model. A real
+  deployment would call an embedding service for `bge-m3` and ship only the 18 MB part, exported to plain weight
+  tables. That export is not written yet.
+- Hacked sites often show the scam only to search engines. A normal visit sees the clean site.
+- The compare site reads pages with headless Chromium from this Mac. Some sites block it, and a page can look
+  different in Safari on a phone.
+- There is a bug in the Shoo repo's eval tool, not in this lab: the email mask in `ai/eval/tools/patterns.mjs` line 14
+  takes minutes on long text without an `@`. Two pages that trigger it are `data/phish/00590.html.gz` and
+  `data/phish/02224.html.gz`. This lab cuts unfinished `<script>` and `<style>` tails and gives each page 4 seconds.
 
-## Update, 12 Nov 2026 (supersedes the numbers above)
+## Data
 
-Data: 15,876 pages (train 10,995 / dev 2,431 / test 2,402; test = 828 scam, 1,574 benign), split by site. New sources:
-165 real Indonesian phishing pages (`phish_id`, from `nyuuzyou/phishing-snapshots`) and 992 hard legit pages (`hard_legit`).
+Not in git. 15,876 pages in total, split by site so that no site is in both training and test: 10,995 to train,
+2,431 to set the tier limits, 2,402 to test.
 
-Full pipeline on held-out sites (`src/layer4_run.mjs`, `src/layer4_v5.mjs`, `src/pipeline_eval.py`). Not simulated for
-either side: live blocklist and domain age, because the test pages are historical.
-
-| Pipeline | Scam passed as safe | Benign warned or blocked |
+| Source | Label | Pages |
 |---|---|---|
-| Shipped: layers 1-2, layer 3 rules, layer 4 `reality-check.v4` | 96.6% | 1.1% |
-| Rebuilt layer 3 alone (block + warn tiers) | 17.9% | 2.8% |
-| Rebuilt layer 3, gate tier also warns (`strict`) | 3.9% | 15.9% |
-| Rebuilt layer 3 + `scam-judge.v1`, judge "legit" clears gate and warn (`judge`) | 23.3% | 2.7% |
-| Rebuilt layer 3 + `scam-judge.v1`, judge "legit" clears gate only (`judge-keep`) | 13.3% | 4.7% |
+| `kirco567/ScamWeb-Dataset` (CC BY 4.0) | scam and legit | 3,041 and 2,227 |
+| `nyuuzyou/phishing-snapshots` (CC0), takedown pages removed | scam | 3,489 |
+| Indonesian pages from the same phishing set | scam | 165 |
+| Indonesian online gambling pages found by search | scam | 90 |
+| Popular sites: home page, a login or checkout page, one more page | legit | 1,714 |
+| Small, little-known sites | legit | 2,500 |
+| Indonesian `.id` sites and 173 hand-picked Indonesian sites | legit | 1,610 |
+| Hard legit pages: logins, checkouts, articles about scams | legit | 992 |
+| `0xRafie/indonesian-gambling-multimodal-dataset` captions | training only | 4,892 |
+| Shoo's eval corpus (47 scam, 39 legit) | test only | 86 |
 
-Findings:
+Two cleaning steps:
 
-- `reality-check.v4` judges only what a form asks for. Asked about 373 scam pages it answered "reasonable" on 353.
-  It cannot be the second opinion for scams without a form (shops, gambling, investment, giveaways).
-- `scam-judge.v1` (general prompt, same model, written once, not tuned on test) raised blocked scam from 51.1% to 63.5%
-  and called 12 of 245 benign pages scam. It called 161 scam-labelled pages legit. Of those, 36 are sites in the
-  Tranco top 1M (label most likely wrong, e.g. decathlon.co.uk) and 11 are dead or placeholder pages. The rest are
-  mostly shop pages that read like a real shop: content alone cannot tell them apart. That needs domain age and the
-  blocklist, which run live and are not measured here.
-- Indonesian: real Indonesian phishing (38 test pages) 0 passed as safe under `strict`, 2.6% under `judge-keep`;
-  online gambling (23) 0 passed as safe under both.
-- Hand-written trap pages from the eval corpus (10): still 6-7 warned. Real legit corpus pages (29): 0 warned.
-- Cost of `scam-judge.v1`: 637 calls, 1.11M tokens in, 0.33M out, median 1.5 s, p95 2.6 s. Asked for 26.5% of all
-  test pages (15.6% of benign).
-- `ai/eval/tools/snapshot.mjs` hang: the email mask in `ai/eval/tools/patterns.mjs:14` is quadratic on long runs
-  without `@`. Reproducers: `data/phish/00590.html.gz`, `data/phish/02224.html.gz`. This lab cuts unfinished
-  `<script>`/`<style>` tails and limits each page to 4 s.
+- Training pages with a label that is clearly wrong are dropped: pages labelled scam that every model, trained
+  without them, calls legit. Test pages are never dropped.
+- One source was thrown out. Reported Indonesian phishing URLs, fetched today, now show unrelated pages, so their
+  labels are wrong.
 
-## Compare site (`site/`)
+Scam pages are hostile. The training data is saved HTML that is only parsed as text.
 
-Paste URLs, both pipelines answer side by side, with a screenshot and the evidence per layer.
+## Run the experiment
+
+```bash
+A=~/epel/Final-CH7/ai
+node src/build_snapshots.mjs $A data/scamweb out/pages.jsonl                         # ScamWeb pages + what the current rules say
+node src/build_snapshots.mjs $A --corpus out/corpus.jsonl                            # Shoo's eval corpus
+python3 -I src/fetch_pages.py sites data/legit_top data/lists/sites_top.txt          # legit pages: home + login/checkout + one more
+python3 -I src/fetch_pages.py urls data/judol data/lists/judol_urls.txt              # reported scam URLs, plain download only
+uv run --no-project --with duckdb python -I src/sample_phish.py data/phish 6         # real phishing pages
+node src/build_snapshots.mjs $A --dir out/src_phish.jsonl data/phish 1 phish -       # one per source: <dir> <label> <prefix> <language|->
+python3 -I src/assemble.py out                                                       # clean and merge sources into out/extra.jsonl
+uv run python src/embed.py out/pages.jsonl out/emb                                   # text to numbers
+uv run python src/embed.py out/extra.jsonl out/extra_emb
+uv run python src/embed.py out/corpus.jsonl out/corpus_emb
+uv run python src/train_eval.py out --refit                                          # train everything (about 25 min)
+node src/layer4_run.mjs $A out                                                       # shipped pipeline on the test pages
+node src/layer4_v5.mjs $A out                                                        # new judge prompt on unsure and warn pages
+python3 -I src/pipeline_eval.py out                                                  # the comparison tables
+cd src && uv run python analyze.py --id scam_18544                                   # one page, both systems, with evidence
+```
+
+## Compare site
+
+A local web page. Paste URLs, and both pipelines answer side by side with a screenshot and the evidence from each
+layer. You mark each page as scam or legit, and the site shows who missed and who flagged a legit page.
 
 ```bash
 cd site && npm install && cd ..
 uv run python site/server.py     # then open http://127.0.0.1:8799
 ```
 
-- `site/reader.mjs` opens each URL once in headless Chromium (phone size, fresh profile), takes a screenshot, and runs the
-  shipped pipeline from the Shoo repo: layers 1-2, layer 3 rules, live domain age, layer 4.
-- `site/server.py` runs the rebuilt layer 3 (needs `out/layer3_base.joblib` and `out/layer3_meta.joblib` from
-  `src/train_eval.py`) and the `scam-judge.v1` prompt. It listens on 127.0.0.1 only.
-- Both read the LLM settings from `~/epel/Final-CH7/ai/.dev.vars` into memory. No key is stored in this repo.
-- `site/urls-500.csv`: 500 labelled URLs (reported phishing from public feeds, online gambling, legit sites), none from a
-  site the model was trained on. The scam URLs are live: do not open them in a normal browser.
-- `site/compare.html` is the earlier static mock (`site/build.py` builds it from `template.html` and the sample files).
-- `data/` and `out/` (datasets, vectors, trained models) are not in git.
+- `site/reader.mjs` opens each URL once in headless Chromium (phone size, no saved profile), takes a screenshot and
+  runs the shipped pipeline from the Shoo repo, with the live domain age.
+- `site/server.py` runs the rebuilt layer 3 and the judge prompt. It needs `out/layer3_base.joblib` and
+  `out/layer3_meta.joblib`, which `src/train_eval.py` writes. It only listens on this machine.
+- Both read the LLM settings from `~/epel/Final-CH7/ai/.dev.vars` while running. No key is stored in this repo.
+- `site/urls-500.csv` has 500 labelled URLs: reported phishing from public feeds, online gambling, and legit sites.
+  The scam URLs are live. Do not open them in your normal browser.
+- Results can be exported as CSV or JSON.
+- `site/compare.html` is an older static mock. `site/build.py` builds it from `template.html` and the sample files.
