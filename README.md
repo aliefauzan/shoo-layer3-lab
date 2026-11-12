@@ -3,6 +3,47 @@
 Experiment: a rebuilt Shoo layer 3 (structure signals + text meaning) compared with the current layer 3 rules in
 `Final-CH7/ai`. Nothing here ships. The Shoo repo is only read (its parser and rules are imported, never edited).
 
+## Results at a glance (13 Nov 2026)
+
+"Shipped" is the pipeline in the Shoo repo today (layers 1-2 on device, layer 3 rules, layer 4 `reality-check.v4`).
+"Rebuilt" is this lab: the rebuilt layer 3 plus the `scam-judge.v1` layer 4 prompt. A page counts as caught when the
+pipeline shows any warning or blocks it.
+
+**Live pages** (`site/urls-500.csv`, read with headless Chromium on 13 Nov 2026; 397 of 500 counted: 75 redirected to
+another site, 11 showed a bot wall, 17 did not open). None of these sites was in training.
+
+| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged | Precision |
+|---|---|---|---|---|---|
+| Shipped | 64.7% | 23.1% (40/173) | 76.9% | 3.1% (7/224) | 85.1% |
+| Rebuilt, strict rule | 88.4% | 96.0% (166/173) | 4.0% | 17.4% (39/224) | 81.0% |
+| Rebuilt, balanced rule | 94.5% | 94.8% (164/173) | 5.2% | 5.8% (13/224) | 92.7% |
+
+**Held-out pages** (2,402 saved pages from sites not in training: 828 scam, 1,574 legit). No live blocklist and no
+domain age for either pipeline, so the balanced rule cannot be measured here.
+
+| Pipeline | Accuracy | Scam caught | Scam passed as safe | Legit pages flagged | Precision |
+|---|---|---|---|---|---|
+| Shipped | 65.9% | 3.4% (28/828) | 96.6% | 1.1% (18/1,574) | 60.9% |
+| Rebuilt layer 3 alone | 92.0% | 82.1% (680/828) | 17.9% | 2.8% (44/1,574) | 93.9% |
+| Rebuilt, strict rule | 88.3% | 96.1% (796/828) | 3.9% | 15.9% (250/1,574) | 76.1% |
+| Rebuilt, judge rule | 92.3% | 86.7% (718/828) | 13.3% | 4.7% (74/1,574) | 90.7% |
+
+Rules for the rebuilt pipeline (layer 3 puts a page in one of four tiers: safe, unsure, warn, block):
+
+- **strict**: every unsure page gets a soft warning.
+- **judge**: an unsure page passes when the layer 4 judge says legit.
+- **balanced**: the judge's "legit" counts only on an established domain (1 year for unsure, 3 years for warn) whose
+  address has no brand name, shared host or raw IP. Needs the live domain age.
+
+How far to trust these numbers:
+
+- The balanced rule's age limits were chosen on the same 500 live URLs, so its row is optimistic. It needs a fresh
+  URL list to confirm.
+- Scam labels on live URLs mean "reported to a public phishing feed today". Some pages may already be replaced.
+- Held-out scam labels contain errors (for example popular real shops labelled scam), which lowers every row.
+- The rebuilt pipeline did not use the on-device layers 1-2. The shipped one did.
+- The judge was asked for 142 of the 397 live pages (36%); the shipped layer 4 runs only for scores 30-79.
+
 ## Run
 
 ```bash
